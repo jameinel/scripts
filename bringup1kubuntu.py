@@ -3,8 +3,10 @@
 import os
 import sys
 import subprocess
+import threading
 import time
 import yaml
+import Queue
 
 import jujuclient
 
@@ -141,12 +143,45 @@ def deploy_machines(opts, env):
     ##run(opts, cmd)
 
 
-def add_lxcs(opts, env):
+def work_on_queue(env, queue):
+    while True:
+        #sys.stdout.write('waiting for queue item\n'); sys.stdout.flush()
+        nextItem = queue.get()
+        try:
+            #sys.stdout.write('got %s\n' % (nextItem,)); sys.stdout.flush()
+            funcName, kwargs = nextItem
+            if funcName == 'stop':
+                return
+            func = getattr(env, funcName)
+            func(**kwargs)
+        finally:
+            queue.task_done()
+
+
+def create_env_workers(envs):
+    """Create a thread worker for each env"""
+    queue = Queue.Queue()
+    threads = []
+    for env in envs:
+        t = threading.Thread(target=work_on_queue, args=(env, queue))
+        threads.append(t)
+        t.start()
+    return queue, threads
+
+
+def enqueue(queue, funcName, **kwargs):
+    queue.put((funcName, kwargs))
+
+def add_lxcs(opts, queue):
     tfirst = time.time()
     for j in range(opts.num_lxc):
         tstart = time.time()
         for i in range(opts.num_machines):
-            env.add_unit('ubuntu', machine_spec='lxc:%d' % (i+1,))
+            enqueue(queue,
+                    'add_unit',
+                    service_name='ubuntu',
+                    machine_spec='lxc:%d' % (i+1,))
+        queue.join()
         tend = time.time()
         sys.stdout.write('%8.3fs added %d lxc machines\n'
                 % (tend - tstart, opts.num_machines))
@@ -163,14 +198,18 @@ def add_lxcs(opts, env):
     ##    run_async(opts, torun)
 
 
-def add_units(opts, env):
+def add_units(opts, queue):
     """Add all the units to the machines that we asked for.
     """
     tfirst = time.time()
     for j in range(opts.num_units):
         tstart = time.time()
         for i in range(opts.num_machines):
-            env.add_unit('ubuntu', machine_spec='%d' % (i+1,))
+            enqueue(queue,
+                    'add_unit',
+                    service_name='ubuntu',
+                    machine_spec='%d' % (i+1,))
+        queue.join()
         tend = time.time()
         sys.stdout.write('%8.3fs added %d units\n'
                 % (tend - tstart, opts.num_machines))
@@ -193,13 +232,25 @@ def build_env(opts):
     reset_constraints(opts)
     if opts.dry_run:
         return
-    env = connect_to_environment(opts)
-    deploy_machines(opts, env)
+    envs = []
+    for _ in range(opts.in_parallel):
+        envs.append(connect_to_environment(opts))
+    deploy_machines(opts, envs[0])
     status(opts)
-    add_lxcs(opts, env)
+    queue, threads = create_env_workers(envs)
+    sys.stdout.write('created %d workers\n' %(len(threads),)); sys.stdout.flush()
+    add_lxcs(opts, queue)
     status(opts)
-    add_units(opts, env)
+    add_units(opts, queue)
     status(opts)
+    #sys.stdout.write('stopping\n'); sys.stdout.flush()
+    for _ in range(opts.in_parallel):
+        queue.put(('stop', {}))
+    #sys.stdout.write('waiting for queue\n'); sys.stdout.flush()
+    queue.join()
+    #sys.stdout.write('waiting for threads\n'); sys.stdout.flush()
+    for t in threads:
+        t.join()
 
 def parse_args(args):
         import argparse
@@ -219,10 +270,12 @@ def parse_args(args):
                 help='How many LXC machines per virtual machine')
         p.add_argument('--num-units', '-u', default=100, type=int,
                 help='How many units of Ubuntu per Machine')
+        p.add_argument('--in-parallel', type=int, default=1,
+                help="create multiple connections for creating units")
         p.add_argument('--dry-run', action='store_true', default=True,
-            help="print what you would do, don't do it yet")
+                help="print what you would do, don't do it yet")
         p.add_argument('--no-dry-run', dest='dry_run', action='store_false',
-            help="override --dry-run and just do it")
+                help="override --dry-run and just do it")
 
         return p.parse_args(args)
 
