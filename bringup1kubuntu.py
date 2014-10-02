@@ -143,6 +143,9 @@ def deploy_machines(opts, env):
     ##run(opts, cmd)
 
 
+failureCount = 0
+successCount = 0
+
 def work_on_queue(env, queue):
     while True:
         #sys.stdout.write('waiting for queue item\n'); sys.stdout.flush()
@@ -153,7 +156,14 @@ def work_on_queue(env, queue):
             if funcName == 'stop':
                 return
             func = getattr(env, funcName)
-            func(**kwargs)
+            try:
+                result = func(**kwargs)
+            except jujuclient.EnvError as e:
+                global failureCount
+                failureCount++
+            else:
+                global successCount
+                successCount++
         finally:
             queue.task_done()
 
@@ -249,8 +259,20 @@ def build_env(opts):
     #sys.stdout.write('waiting for queue\n'); sys.stdout.flush()
     queue.join()
     #sys.stdout.write('waiting for threads\n'); sys.stdout.flush()
+    successPercent = 100.0
+    failurePercent = 0.0
+    if successCount > 0 or failureCount > 0:
+        successPercent = 100.0 * float(successCount) / (successCount + failureCount)
+        failurePercent = 100.0 * float(failureCount) / (successCount + failureCount)
+    sys.stdout.write('success count: %d %.2f%%\nfailure count: %d %.2f%%\n',
+
     for t in threads:
         t.join()
+
+
+bigMem = 'mem=29G cpu-cores=8'
+medMem = 'mem=7G cpu-cores=2'
+smallMem = 'mem=2G cpu-cores=1'
 
 def parse_args(args):
         import argparse
@@ -260,9 +282,9 @@ def parse_args(args):
         p.add_argument('--environment', '-e', default=None, help='set the environment to run on')
         p.add_argument('--ha', action='store_true',
                 help='change the state servers to be in HA mode')
-        p.add_argument('--constraints-0', '-0', default='mem=29G cpu-cores=8',
+        p.add_argument('--constraints-0', '-0', default=bigMem,
                 help='Set the size of the root machine. By default it is an m3.2xlarge')
-        p.add_argument('--constraints-1', '-1', default='mem=7G cpu-cores=2',
+        p.add_argument('--constraints-1', '-1', default=medMem,
                 help='Set the constraints for machines other that bootstrap, default is m3.large')
         p.add_argument('--num-machines', '-n', default=15, type=int,
                 help='How many virtual machines to allocate (default 15)')
