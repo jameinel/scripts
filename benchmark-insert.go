@@ -70,35 +70,35 @@ func maybeRollback(db *mgo.Database, cond bool) error {
 	return nil
 }
 
-func oneByOneDirect(db *mgo.Database) {
+func oneByOneDirect(db *mgo.Database) error {
 	collection := db.C("foo")
-	if maybeBegin(db, *OneTrans) != nil {
-		return
+	if err := maybeBegin(db, *OneTrans); err != nil {
+		return err
 	}
 	for i := 0; i < *Count; i++ {
 		val := *Start + i
 		strVal := fmt.Sprintf("%07d", val)
-		if maybeBegin(db, *EachTrans) != nil {
-			return
+		if err := maybeBegin(db, *EachTrans); err != nil {
+			return err
 		}
 		if err := collection.Insert(bson.M{"_id": strVal, "val": strVal}); err != nil {
 			fmt.Printf("could not insert %d\n%s\n", val, err)
 			// ignore the error because we are returning anyway
 			maybeRollback(db, *OneTrans || *EachTrans)
-			return
+			return err 
 		}
-		if maybeCommit(db, *EachTrans) != nil {
-			return
+		if err := maybeCommit(db, *EachTrans); err != nil {
+			return err
 		}
 	}
 	// ignore the error because we are returning anyway
-	maybeCommit(db, *OneTrans)
+	return maybeCommit(db, *OneTrans)
 }
 
-func bulkDirect(db *mgo.Database) {
+func bulkDirect(db *mgo.Database) error {
 	collection := db.C("foo")
-	if maybeBegin(db, *OneTrans || *EachTrans) != nil {
-		return
+	if err := maybeBegin(db, *OneTrans || *EachTrans); err != nil {
+		return err
 	}
 	docs := make([]interface{}, 0, *Count)
 	for i := 0; i < *Count; i++ {
@@ -113,10 +113,10 @@ func bulkDirect(db *mgo.Database) {
 		fmt.Printf("could not insert all docs\n%s\n", err.Error())
 		// ignore the error because we are returning anyway
 		maybeRollback(db, *OneTrans || *EachTrans)
-		return
+		return err
 	}
 	// ignore the error because we are returning anyway
-	maybeCommit(db, *OneTrans || *EachTrans)
+	return maybeCommit(db, *OneTrans || *EachTrans)
 }
 
 func oneDocOp(val int) txn.Op {
@@ -129,15 +129,15 @@ func oneDocOp(val int) txn.Op {
 	}
 }
 
-func oneByOneClientTrans(db *mgo.Database) {
+func oneByOneClientTrans(db *mgo.Database) error {
 	txnCollection := db.C("transactions")
-	if maybeBegin(db, *OneTrans) != nil {
-		return
+	if err := maybeBegin(db, *OneTrans); err != nil {
+		return err
 	}
 	for i := 0; i < *Count; i++ {
 		val := *Start + i
-		if maybeBegin(db, *EachTrans) != nil {
-			return
+		if err := maybeBegin(db, *EachTrans); err != nil {
+			return err
 		}
 		runner := txn.NewRunner(txnCollection)
 		op := oneDocOp(val)
@@ -146,21 +146,21 @@ func oneByOneClientTrans(db *mgo.Database) {
 			fmt.Printf("could not insert %d\n%s\n", val, err)
 			// ignore the error because we are returning anyway
 			maybeRollback(db, *OneTrans || *EachTrans)
-			return
+			return err
 		}
-		if maybeCommit(db, *EachTrans) != nil {
-			return
+		if err := maybeCommit(db, *EachTrans); err != nil {
+			return err
 		}
 	}
 	// ignore the error because we are returning anyway
-	maybeCommit(db, *OneTrans)
+	return maybeCommit(db, *OneTrans)
 }
 
-func bulkClientTrans(db *mgo.Database) {
+func bulkClientTrans(db *mgo.Database) error {
 	txnCollection := db.C("transactions")
 	ops := make([]txn.Op, 0, *Count)
-	if maybeBegin(db, *OneTrans || *EachTrans) != nil {
-		return
+	if err := maybeBegin(db, *OneTrans || *EachTrans); err != nil {
+		return err
 	}
 	for i := 0; i < *Count; i++ {
 		ops = append(ops, oneDocOp(*Start+i))
@@ -171,10 +171,10 @@ func bulkClientTrans(db *mgo.Database) {
 		fmt.Printf("could not insert all\n%s\n", err)
 		// ignore the error because we are returning anyway
 		maybeRollback(db, *OneTrans || *EachTrans)
-		return
+		return err
 	}
 	// ignore the error because we are returning anyway
-	maybeCommit(db, *OneTrans || *EachTrans)
+	return maybeCommit(db, *OneTrans || *EachTrans)
 }
 
 type ValDoc struct {
@@ -223,18 +223,22 @@ func main() {
 	}
 	if *Bulk {
 		if *ClientTrans {
-			bulkClientTrans(db)
+			err = bulkClientTrans(db)
 		} else {
-			bulkDirect(db)
+			err = bulkDirect(db)
 		}
 	} else {
 		if *ClientTrans {
-			oneByOneClientTrans(db)
+			err = oneByOneClientTrans(db)
 		} else {
-			oneByOneDirect(db)
+			err = oneByOneDirect(db)
 		}
 	}
-	fmt.Printf("%.3fms to insert %d documents\n", float64(time.Since(start))/float64(time.Millisecond), *Count)
+	if err != nil {
+		fmt.Printf("%.3fms to insert %d documents (failed: %s)\n", float64(time.Since(start))/float64(time.Millisecond), *Count, err)
+	} else {
+		fmt.Printf("%.3fms to insert %d documents\n", float64(time.Since(start))/float64(time.Millisecond), *Count)
+	}
 	if *Verify {
 		if err := verifyNewDocs(db); err != nil {
 			fmt.Printf("verification failed: %s\n", err.Error())
