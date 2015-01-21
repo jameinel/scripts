@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"net"
 	"time"
 
 	"gopkg.in/mgo.v2"
@@ -33,7 +34,7 @@ func isCodeRetry(code int) bool {
 	return retryCodes[code]
 }
 
-func shouldRetry(err error) bool {
+func shouldRetry(err error, session *mgo.Session) bool {
 	if err == nil {
 		return false
 	}
@@ -44,6 +45,16 @@ func shouldRetry(err error) bool {
 	if mgoErr, ok := err.(*mgo.QueryError); ok {
 		fmt.Printf("QueryError: %#v\n", mgoErr)
 		return isCodeRetry(mgoErr.Code)
+	}
+	if netErr, ok := err.(*net.OpError); ok {
+		fmt.Printf("OpError: %#v\n", netErr)
+		if netErr.Temporary() || netErr.Timeout() {
+			// tcp timeout errors need a refresh on the session so
+			// we reconnect before we try again
+			session.Refresh()
+			return true
+		}
+		return false
 	}
 	return false
 }
@@ -59,23 +70,10 @@ func transactionCommand(db *mgo.Database, cmd interface{}) error {
 	return nil
 }
 
-func begin(db *mgo.Database, retries *int) error {
-	//begin takes 'retries' because we know no other work has been
-	//done that we might want to clean up. so we just retry this specific
-	//operation.
-	for {
-		if err := transactionCommand(db, map[string]interface{}{"beginTransaction": 1}); err != nil {
-			fmt.Printf("failed to beginTransaction: %s\n", err)
-			if shouldRetry(err) {
-				if retries != nil && *retries < *MaxRetry {
-					*retries++
-					RetryCount++
-					continue
-				}
-			}
-			return err
-		}
-		return nil
+func begin(db *mgo.Database) error {
+	if err := transactionCommand(db, map[string]interface{}{"beginTransaction": 1}); err != nil {
+		fmt.Printf("failed to beginTransaction: %s\n", err)
+		return err
 	}
 	return nil
 }
@@ -107,14 +105,19 @@ func oneDocOp(val int) txn.Op {
 	}
 }
 
-func oneByOneClientTrans(db *mgo.Database) error {
+func oneByOneClientTrans(session *mgo.Session) error {
+	db := session.DB("test")
 	txnCollection := db.C("transactions")
 	var retries int = 0
 	for i := 0; i < *Count; i++ {
 		val := *Start + i
 		// Reset retries per document
 		for retries = 0; retries < *MaxRetry; retries++ {
-			if err := begin(db, &retries); err != nil {
+			if err := begin(db); err != nil {
+				if shouldRetry(err, session) {
+					RetryCount += 1
+					continue
+				}
 				return err
 			}
 			runner := txn.NewRunner(txnCollection)
@@ -124,16 +127,17 @@ func oneByOneClientTrans(db *mgo.Database) error {
 				fmt.Printf("failed to insert %d\n%s\n", val, err)
 				// ignore an error from rollback?
 				if err2 := rollback(db); err2 != nil {
-					fmt.Printf("failed to rollback while failing: %s\n", err2)
+					// For now, don't print anything, because we're already in an error state.
+					// fmt.Printf("failed to rollback while failing: %s\n", err2)
 				}
-				if shouldRetry(err) {
+				if shouldRetry(err, session) {
 					RetryCount += 1
 					continue
 				}
 				return err
 			}
 			if err := commit(db); err != nil {
-				if shouldRetry(err) {
+				if shouldRetry(err, session) {
 					RetryCount += 1
 					continue
 				}
@@ -174,16 +178,15 @@ func main() {
 		panic(err)
 	}
 	session.SetSafe(&mgo.Safe{FSync: false})
-	db := session.DB("test")
 	start := time.Now()
-	err = oneByOneClientTrans(db)
+	err = oneByOneClientTrans(session)
 	if err != nil {
 		fmt.Printf("%.3fms to insert %d documents (%d retries, FAILED: %s)\n", float64(time.Since(start))/float64(time.Millisecond), *Count, RetryCount, err)
 	} else {
 		fmt.Printf("%.3fms to insert %d documents (%d retries)\n", float64(time.Since(start))/float64(time.Millisecond), *Count, RetryCount)
 	}
 	if *Verify {
-		if err := verifyNewDocs(db); err != nil {
+		if err := verifyNewDocs(session.DB("test")); err != nil {
 			fmt.Printf("verification failed: %s\n", err.Error())
 			return
 		}
