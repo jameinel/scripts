@@ -55,9 +55,11 @@ func shouldRetry(err error) bool {
 		return false
 	}
 	if mgoErr, ok := err.(*mgo.LastError); ok {
+		fmt.Printf("LastError: %#v\n", mgoErr)
 		return isCodeRetry(mgoErr.Code)
 	}
 	if mgoErr, ok := err.(*mgo.QueryError); ok {
+		fmt.Printf("QueryError: %#v\n", mgoErr)
 		return isCodeRetry(mgoErr.Code)
 	}
 	return false
@@ -139,7 +141,7 @@ func oneByOneDirect(db *mgo.Database) error {
 				return err
 			}
 			if err := collection.Insert(bson.M{"_id": strVal, "val": strVal}); err != nil {
-				fmt.Printf("could not insert doc 1 %d\n%s\n", val, err)
+				fmt.Printf("could not insert doc %d\n%s\n", val, err)
 				// ignore the error because we are returning anyway
 				maybeRollback(db, *OneTrans || *EachTrans)
 				if shouldRetry(err) {
