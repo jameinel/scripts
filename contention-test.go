@@ -64,7 +64,7 @@ func begin(db *mgo.Database, retries *int) error {
 	//done that we might want to clean up. so we just retry this specific
 	//operation.
 	for {
-		if err := transactionCommand(db, map[string]interface{}{"beginTransaction": 1, "timeout": 6000}); err != nil {
+		if err := transactionCommand(db, map[string]interface{}{"beginTransaction": 1}); err != nil {
 			fmt.Printf("failed to beginTransaction: %s\n", err)
 			if shouldRetry(err) {
 				if retries != nil && *retries < *MaxRetry {
