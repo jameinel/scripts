@@ -17,8 +17,10 @@ var Start = flag.Int("start", 0, "starting offset")
 var Unsafe = flag.Bool("unsafe", false, "set safe mode to non-blocking and not-checking errors")
 var Sync = flag.Bool("sync", false, "Force an fsync for writes to be considered committed (ignored if Unsafe is set)")
 var ClientTrans = flag.Bool("client-trans", false, "Use client-side Mongo Transactions (mgo/txn) to update the database.")
-var Trans = flag.Bool("trans", false, "Use beginTransaction/commitTransaction calls.")
+var OneTrans = flag.Bool("one-trans", false, "Use beginTransaction/commitTransaction across all inserts.")
+var EachTrans = flag.Bool("each-trans", false, "Use beginTransaction/commitTransaction across each single call (bulk or one-by-one each gets a separate transaction).")
 var Verify = flag.Bool("verify", false, "After inserting, verify all documents are correct and new docs are inserted.")
+var Verbose = flag.Bool("verbose", false, "Print more information.")
 
 func transactionCommand(db *mgo.Database, cmd interface{}) error {
 	var result bson.M
@@ -31,9 +33,15 @@ func transactionCommand(db *mgo.Database, cmd interface{}) error {
 	return nil
 }
 
-func maybeBegin(db *mgo.Database) error {
-	if *Trans {
-		if err := transactionCommand(db, "beginTransaction"); err != nil {
+func maybeBegin(db *mgo.Database, cond bool) error {
+	if cond {
+		// FoundationDB has a built-in 5s timeout for find() operations
+		// operating inside of a transaction. So just set the max
+		// timeout to 5s so we don't think we can get away with it when
+		// running in single insert mode.
+		// We set it to 6s so that we can see past_version failures
+		// rather than transaction_timeout ones.
+		if err := transactionCommand(db, map[string]interface{}{"beginTransaction": 1, "timeout":6000}); err != nil {
 			fmt.Printf("failed to beginTransaction: %s\n", err)
 			return err
 		}
@@ -41,8 +49,8 @@ func maybeBegin(db *mgo.Database) error {
 	return nil
 }
 
-func maybeCommit(db *mgo.Database) error {
-	if *Trans {
+func maybeCommit(db *mgo.Database, cond bool) error {
+	if cond {
 		if err := transactionCommand(db, "commitTransaction"); err != nil {
 			fmt.Printf("failed to commitTransaction: %s\n", err)
 			return err
@@ -51,8 +59,8 @@ func maybeCommit(db *mgo.Database) error {
 	return nil
 }
 
-func maybeRollback(db *mgo.Database) error {
-	if *Trans {
+func maybeRollback(db *mgo.Database, cond bool) error {
+	if cond {
 		if err := transactionCommand(db, "rollbackTransaction"); err != nil {
 			// error is not printed, because we are probably already failing
 			// fmt.Printf("failed to commitTransaction: %s\n", err)
@@ -64,46 +72,55 @@ func maybeRollback(db *mgo.Database) error {
 
 func oneByOneDirect(db *mgo.Database) {
 	collection := db.C("foo")
-	if maybeBegin(db) != nil {
+	if maybeBegin(db, *OneTrans) != nil {
 		return
 	}
 	for i := 0; i < *Count; i++ {
 		val := *Start + i
-		strVal := fmt.Sprintf("%04d", val)
+		strVal := fmt.Sprintf("%07d", val)
+		if maybeBegin(db, *EachTrans) != nil {
+			return
+		}
 		if err := collection.Insert(bson.M{"_id": strVal, "val": strVal}); err != nil {
 			fmt.Printf("could not insert %d\n%s\n", val, err)
 			// ignore the error because we are returning anyway
-			maybeRollback(db)
+			maybeRollback(db, *OneTrans || *EachTrans)
+			return
+		}
+		if maybeCommit(db, *EachTrans) != nil {
 			return
 		}
 	}
 	// ignore the error because we are returning anyway
-	maybeCommit(db)
+	maybeCommit(db, *OneTrans)
 }
 
 func bulkDirect(db *mgo.Database) {
 	collection := db.C("foo")
-	if maybeBegin(db) != nil {
+	if maybeBegin(db, *OneTrans || *EachTrans) != nil {
 		return
 	}
 	docs := make([]interface{}, 0, *Count)
 	for i := 0; i < *Count; i++ {
 		val := *Start + i
-		strVal := fmt.Sprintf("%04d", val)
+		strVal := fmt.Sprintf("%07d", val)
 		docs = append(docs, bson.M{"_id": strVal, "val": strVal})
+	}
+	if *Verbose {
+		fmt.Printf("First doc: %v\n", docs[0]);
 	}
 	if err := collection.Insert(docs...); err != nil {
 		fmt.Printf("could not insert all docs\n%s\n", err.Error())
 		// ignore the error because we are returning anyway
-		maybeRollback(db)
+		maybeRollback(db, *OneTrans || *EachTrans)
 		return
 	}
 	// ignore the error because we are returning anyway
-	maybeCommit(db)
+	maybeCommit(db, *OneTrans || *EachTrans)
 }
 
 func oneDocOp(val int) txn.Op {
-	strVal := fmt.Sprintf("%04d", val)
+	strVal := fmt.Sprintf("%07d", val)
 	return txn.Op{
 		C:      "foo",
 		Id:     strVal,
@@ -114,29 +131,35 @@ func oneDocOp(val int) txn.Op {
 
 func oneByOneClientTrans(db *mgo.Database) {
 	txnCollection := db.C("transactions")
-	if maybeBegin(db) != nil {
+	if maybeBegin(db, *OneTrans) != nil {
 		return
 	}
 	for i := 0; i < *Count; i++ {
 		val := *Start + i
+		if maybeBegin(db, *EachTrans) != nil {
+			return
+		}
 		runner := txn.NewRunner(txnCollection)
 		op := oneDocOp(val)
 		txnId := bson.NewObjectId()
 		if err := runner.Run([]txn.Op{op}, txnId, nil); err != nil {
 			fmt.Printf("could not insert %d\n%s\n", val, err)
 			// ignore the error because we are returning anyway
-			maybeRollback(db)
+			maybeRollback(db, *OneTrans || *EachTrans)
+			return
+		}
+		if maybeCommit(db, *EachTrans) != nil {
 			return
 		}
 	}
 	// ignore the error because we are returning anyway
-	maybeCommit(db)
+	maybeCommit(db, *OneTrans)
 }
 
 func bulkClientTrans(db *mgo.Database) {
 	txnCollection := db.C("transactions")
 	ops := make([]txn.Op, 0, *Count)
-	if maybeBegin(db) != nil {
+	if maybeBegin(db, *OneTrans || *EachTrans) != nil {
 		return
 	}
 	for i := 0; i < *Count; i++ {
@@ -147,11 +170,11 @@ func bulkClientTrans(db *mgo.Database) {
 	if err := runner.Run(ops, txnId, nil); err != nil {
 		fmt.Printf("could not insert all\n%s\n", err)
 		// ignore the error because we are returning anyway
-		maybeRollback(db)
+		maybeRollback(db, *OneTrans || *EachTrans)
 		return
 	}
 	// ignore the error because we are returning anyway
-	maybeCommit(db)
+	maybeCommit(db, *OneTrans || *EachTrans)
 }
 
 type ValDoc struct {
@@ -164,7 +187,7 @@ func verifyNewDocs(db *mgo.Database) error {
 	for i := 0; i < *Count; i++ {
 		val := *Start + i
 		var result ValDoc
-		strVal := fmt.Sprintf("%04d", val)
+		strVal := fmt.Sprintf("%07d", val)
 		if err := collection.FindId(strVal).One(&result); err != nil {
 			return fmt.Errorf("could not find document %d\n", val)
 		}
@@ -189,8 +212,15 @@ func main() {
 	} else {
 		session.SetSafe(&mgo.Safe{FSync: false})
 	}
+	if *OneTrans && *EachTrans {
+		fmt.Printf("--one-trans and --each-trans are mutually exclusive\n")
+		return
+	}
 	db := session.DB("test")
 	start := time.Now()
+	if *Verbose {
+		fmt.Printf("inserting docs from %d to %d\n", *Start, *Start+*Count-1);
+	}
 	if *Bulk {
 		if *ClientTrans {
 			bulkClientTrans(db)
