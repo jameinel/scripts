@@ -10,17 +10,19 @@ import (
 	"gopkg.in/mgo.v2/txn"
 )
 
-var URL = flag.String("mongo", "localhost", "URL for dialing mongo")
-var Bulk = flag.Bool("bulk", false, "use a single bulk call")
-var Count = flag.Int("count", 1000, "number to insert")
-var Start = flag.Int("start", 0, "starting offset")
-var Unsafe = flag.Bool("unsafe", false, "set safe mode to non-blocking and not-checking errors")
-var Sync = flag.Bool("sync", false, "Force an fsync for writes to be considered committed (ignored if Unsafe is set)")
-var ClientTrans = flag.Bool("client-trans", false, "Use client-side Mongo Transactions (mgo/txn) to update the database.")
-var OneTrans = flag.Bool("one-trans", false, "Use beginTransaction/commitTransaction across all inserts.")
-var EachTrans = flag.Bool("each-trans", false, "Use beginTransaction/commitTransaction across each single call (bulk or one-by-one each gets a separate transaction).")
-var Verify = flag.Bool("verify", false, "After inserting, verify all documents are correct and new docs are inserted.")
-var Verbose = flag.Bool("verbose", false, "Print more information.")
+var (
+	URL         = flag.String("mongo", "localhost", "URL for dialing mongo")
+	Bulk        = flag.Bool("bulk", false, "use a single bulk call")
+	Count       = flag.Int("count", 1000, "number to insert")
+	Start       = flag.Int("start", 0, "starting offset")
+	Unsafe      = flag.Bool("unsafe", false, "set safe mode to non-blocking and not-checking errors")
+	Sync        = flag.Bool("sync", false, "Force an fsync for writes to be considered committed (ignored if Unsafe is set)")
+	ClientTrans = flag.Bool("client-trans", false, "Use client-side Mongo Transactions (mgo/txn) to update the database.")
+	OneTrans    = flag.Bool("one-trans", false, "Use beginTransaction/commitTransaction across all inserts.")
+	EachTrans   = flag.Bool("each-trans", false, "Use beginTransaction/commitTransaction across each single call (bulk or one-by-one each gets a separate transaction).")
+	Verify      = flag.Bool("verify", false, "After inserting, verify all documents are correct and new docs are inserted.")
+	Verbose     = flag.Bool("verbose", false, "Print more information.")
+)
 
 func transactionCommand(db *mgo.Database, cmd interface{}) error {
 	var result bson.M
@@ -41,7 +43,7 @@ func maybeBegin(db *mgo.Database, cond bool) error {
 		// running in single insert mode.
 		// We set it to 6s so that we can see past_version failures
 		// rather than transaction_timeout ones.
-		if err := transactionCommand(db, map[string]interface{}{"beginTransaction": 1, "timeout":6000}); err != nil {
+		if err := transactionCommand(db, map[string]interface{}{"beginTransaction": 1, "timeout": 6000}); err != nil {
 			fmt.Printf("failed to beginTransaction: %s\n", err)
 			return err
 		}
@@ -85,7 +87,7 @@ func oneByOneDirect(db *mgo.Database) error {
 			fmt.Printf("could not insert %d\n%s\n", val, err)
 			// ignore the error because we are returning anyway
 			maybeRollback(db, *OneTrans || *EachTrans)
-			return err 
+			return err
 		}
 		if err := maybeCommit(db, *EachTrans); err != nil {
 			return err
@@ -107,7 +109,7 @@ func bulkDirect(db *mgo.Database) error {
 		docs = append(docs, bson.M{"_id": strVal, "val": strVal})
 	}
 	if *Verbose {
-		fmt.Printf("First doc: %v\n", docs[0]);
+		fmt.Printf("First doc: %v\n", docs[0])
 	}
 	if err := collection.Insert(docs...); err != nil {
 		fmt.Printf("could not insert all docs\n%s\n", err.Error())
@@ -219,7 +221,7 @@ func main() {
 	db := session.DB("test")
 	start := time.Now()
 	if *Verbose {
-		fmt.Printf("inserting docs from %d to %d\n", *Start, *Start+*Count-1);
+		fmt.Printf("inserting docs from %d to %d\n", *Start, *Start+*Count-1)
 	}
 	if *Bulk {
 		if *ClientTrans {
