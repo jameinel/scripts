@@ -1,3 +1,4 @@
 *.pyc
 benchmark-insert
+benchmark-pg
 contention-test
