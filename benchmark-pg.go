@@ -13,7 +13,7 @@ var (
 	User      = flag.String("user", "", "username to connect as")
 	Password  = flag.String("password", "", "password for the user")
 	Prepared  = flag.Bool("prepared", false, "use a prepared statement for one-by-one insertion")
-	CopyFrom  = flag.Bool("copyfrom", false, "use COPY FROM instead of INSERT")
+	Copy      = flag.Bool("copy", false, "use COPY FROM instead of INSERT")
 	Count     = flag.Int("count", 1000, "number to insert")
 	Start     = flag.Int("start", 0, "starting offset")
 	OneTrans  = flag.Bool("one-trans", false, "Use beginTransaction/commitTransaction across all inserts.")
@@ -87,50 +87,52 @@ func oneByOneDirect(db *sql.DB) error {
 			}
 		}
 	}
+	if prepared != nil {
+		if err := prepared.Close(); err != nil {
+			return err
+		}
+	}
 	if *OneTrans {
 		return tx.Commit()
 	}
 	return nil
 }
 
-// func bulkDirect(db *sql.DB) error {
-// 	collection := db.C("foo")
-// 	var retries int = 0
-// 	docs := make([]interface{}, 0, *Count)
-// 	for i := 0; i < *Count; i++ {
-// 		val := *Start + i
-// 		strVal := fmt.Sprintf("%07d", val)
-// 		docs = append(docs, bson.M{"_id": strVal, "val": strVal})
-// 	}
-// 	if *Verbose {
-// 		fmt.Printf("First doc: %v\n", docs[0])
-// 	}
-// 	for ; retries < *MaxRetry; retries++ {
-// 		if err := maybeBegin(db, *OneTrans || *EachTrans, &retries); err != nil {
-// 			return err
-// 		}
-// 		if err := collection.Insert(docs...); err != nil {
-// 			fmt.Printf("could not insert all docs\n%s\n", err.Error())
-// 			// ignore the error because we are returning anyway
-// 			maybeRollback(db, *OneTrans || *EachTrans)
-// 			if shouldRetry(err) {
-// 				RetryCount += 1
-// 				continue
-// 			}
-// 			return err
-// 		}
-// 		if err := maybeCommit(db, *OneTrans || *EachTrans); err != nil {
-// 			if shouldRetry(err) {
-// 				RetryCount += 1
-// 				continue
-// 			}
-// 			return err
-// 		} else {
-// 			break
-// 		}
-// 	}
-// 	return nil
-// }
+func bulkDirect(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	stmt, err := tx.Prepare(pq.CopyIn("foo", "id", "val"))
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+	// Build up the COPY FROM by repeated Exec calls
+	for i := 0; i < *Count; i++ {
+		val := *Start + i
+		strVal := fmt.Sprintf("%07d", val)
+		if _, err := stmt.Exec(val, strVal); err != nil {
+			fmt.Printf("error while building up COPY: %s\n", err)
+			tx.Rollback()
+			return err
+		}
+	}
+	// Flush the COPY FROM to postgres
+	if _, err := stmt.Exec(); err != nil {
+		fmt.Printf("error while copying data: %s\n", err)
+		return err
+	}
+	if err := stmt.Close(); err != nil {
+		fmt.Printf("error during stmt.Close(): %s\n", err)
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		fmt.Printf("could not commit transaction: %s\n", err)
+		return err
+	}
+	return nil
+}
 
 type ValDoc struct {
 	val string `bson:"val"`
@@ -232,7 +234,11 @@ func main() {
 		fmt.Printf("inserting docs from %d to %d\n", *Start, *Start+*Count-1)
 	}
 	start := time.Now()
-	err = oneByOneDirect(db)
+	if *Copy {
+		err = bulkDirect(db)
+	} else {
+		err = oneByOneDirect(db)
+	}
 	if err != nil {
 		fmt.Printf("%.3fms to insert %d documents (FAILED: %s)\n", float64(time.Since(start))/float64(time.Millisecond), *Count, err)
 	} else {

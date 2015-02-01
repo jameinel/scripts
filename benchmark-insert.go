@@ -314,7 +314,7 @@ func verifyNewDocs(db *mgo.Database) error {
 
 func main() {
 	flag.Parse()
-	session, err := mgo.DialWithTimeout(*URL, time.Second)
+	session, err := mgo.DialWithTimeout(*URL, 10*time.Second)
 	if err != nil {
 		panic(err)
 	}

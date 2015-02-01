@@ -17,6 +17,7 @@ var (
 	MaxRetry = flag.Int("max-retry", 3, "retry an operation at most this many times")
 	Start    = flag.Int("start", 0, "starting offset")
 	Verify   = flag.Bool("verify", false, "After inserting, verify all documents are correct and new docs are inserted.")
+	Timeout = flag.Int("timeout", 1000, "time in milliseconds to wait for connection timeout")
 )
 
 var RetryCount = 0
@@ -173,7 +174,7 @@ func verifyNewDocs(db *mgo.Database) error {
 
 func main() {
 	flag.Parse()
-	session, err := mgo.DialWithTimeout(*URL, time.Second)
+	session, err := mgo.DialWithTimeout(*URL, time.Duration(*Timeout) * time.Millisecond)
 	if err != nil {
 		panic(err)
 	}
