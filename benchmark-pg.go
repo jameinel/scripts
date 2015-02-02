@@ -227,9 +227,10 @@ func main() {
 			fmt.Printf("set up direct tables\n")
 		}
 	}
-	if *Cleanup || *Setup {
-		return
-	}
+	// For trivial cases, it is useful to cleanup,setup,and run all at the same time.
+	// if *Cleanup || *Setup {
+	// 	return
+	// }
 	if *Verbose {
 		fmt.Printf("inserting docs from %d to %d\n", *Start, *Start+*Count-1)
 	}
