@@ -160,10 +160,10 @@ def work_on_queue(env, queue):
                 result = func(**kwargs)
             except jujuclient.EnvError as e:
                 global failureCount
-                failureCount++
+                failureCount += 1
             else:
                 global successCount
-                successCount++
+                successCount += 1
         finally:
             queue.task_done()
 
@@ -265,6 +265,7 @@ def build_env(opts):
         successPercent = 100.0 * float(successCount) / (successCount + failureCount)
         failurePercent = 100.0 * float(failureCount) / (successCount + failureCount)
     sys.stdout.write('success count: %d %.2f%%\nfailure count: %d %.2f%%\n',
+            successCount, successPercent, failureCount, failurePercent)
 
     for t in threads:
         t.join()
