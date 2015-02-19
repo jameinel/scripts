@@ -266,8 +266,8 @@ def build_env(opts):
     if successCount > 0 or failureCount > 0:
         successPercent = 100.0 * float(successCount) / (successCount + failureCount)
         failurePercent = 100.0 * float(failureCount) / (successCount + failureCount)
-    sys.stdout.write('success count: %d %.2f%%\nfailure count: %d %.2f%%\n',
-            successCount, successPercent, failureCount, failurePercent)
+    sys.stdout.write('success count: %d %.2f%%\nfailure count: %d %.2f%%\n'
+            % (successCount, successPercent, failureCount, failurePercent))
 
     for t in threads:
         t.join()
