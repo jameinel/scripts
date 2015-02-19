@@ -295,7 +295,7 @@ def parse_args(args):
                 help='How many units of Ubuntu per Machine')
         p.add_argument('--in-parallel', type=int, default=1,
                 help="create multiple connections for creating units")
-        p.add_argument('--dry-run', action='store_true', default=True,
+        p.add_argument('--dry-run', action='store_true', default=False,
                 help="print what you would do, don't do it yet")
         p.add_argument('--no-dry-run', dest='dry_run', action='store_false',
                 help="override --dry-run and just do it")
