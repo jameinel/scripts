@@ -91,6 +91,8 @@ def bootstrap(opts):
     cmd = envcmd(opts, "bootstrap")
     if opts.constraints_0:
         cmd.extend(("--constraints", opts.constraints_0))
+    if opts.upload_tools:
+        cmd.append("--upload-tools")
     run(opts, cmd)
 
 
@@ -287,6 +289,8 @@ def parse_args(args):
                 help='Set the size of the root machine. By default it is an m3.2xlarge')
         p.add_argument('--constraints-1', '-1', default=medMem,
                 help='Set the constraints for machines other that bootstrap, default is m3.large')
+        p.add_argument('--upload-tools', default=False, action='store_true',
+                help='pass --upload-tools to juju bootstrap')
         p.add_argument('--num-machines', '-n', default=15, type=int,
                 help='How many virtual machines to allocate (default 15)')
         p.add_argument('--num-lxc', '-l', default=0, type=int,
