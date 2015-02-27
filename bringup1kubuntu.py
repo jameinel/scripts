@@ -123,11 +123,11 @@ def connect_to_environment(opts):
 
 
 def ha(opts):
-    if not opts.ha:
+    if opts.ha == 1:
         return
     cmd = envcmd(opts, "ensure-availability")
+    cmd.extend(["-n", str(opts.ha)])
     run(opts, cmd)
-
 
 def reset_constraints(opts):
     if not opts.constraints_1:
@@ -283,8 +283,8 @@ def parse_args(args):
         p.add_argument('--version', action='version', version='%(prog)s 0.1')
         p.add_argument('--verbose', action='store_true', help='Be chatty')
         p.add_argument('--environment', '-e', default=None, help='set the environment to run on')
-        p.add_argument('--ha', action='store_true',
-                help='change the state servers to be in HA mode')
+        p.add_argument('--ha', type=int, choices=[1, 3, 5, 7], default=1,
+                help='Specify the number of state servers to use (default is 1)')
         p.add_argument('--constraints-0', '-0', default=bigMem,
                 help='Set the size of the root machine. By default it is an m3.2xlarge')
         p.add_argument('--constraints-1', '-1', default=medMem,
