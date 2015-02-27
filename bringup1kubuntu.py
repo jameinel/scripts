@@ -105,7 +105,7 @@ def current_environment_name(opts):
     if opts.environment:
         return opts.environment
     cmd = ["juju", "switch"]
-    return suprocess.check_output(cmd).strip()
+    return subprocess.check_output(cmd).strip()
 
 
 def connect_to_environment(opts):
@@ -159,8 +159,8 @@ def work_on_queue(env, queue):
                 return
             func = getattr(env, funcName)
             try:
-                result = func(**kwargs)
-            except jujuclient.EnvError as e:
+                func(**kwargs)
+            except jujuclient.EnvError:
                 global failureCount
                 failureCount += 1
             else:
