@@ -81,7 +81,7 @@ def run_async(opts, cmds):
 
 
 def envcmd(opts, command):
-    cmd = ["juju", command]
+    cmd = [opts.juju, command]
     if opts.environment is not None:
         cmd.extend(("-e", opts.environment))
     return cmd
@@ -93,6 +93,8 @@ def bootstrap(opts):
         cmd.extend(("--constraints", opts.constraints_0))
     if opts.upload_tools:
         cmd.append("--upload-tools")
+    if opts.debug:
+        cmd.append("--debug")
     run(opts, cmd)
 
 
@@ -238,7 +240,8 @@ def add_units(opts, queue):
 
 
 def build_env(opts):
-    bootstrap(opts)
+    if opts.bootstrap:
+        bootstrap(opts)
     status(opts)
     ha(opts)
     reset_constraints(opts)
@@ -283,6 +286,9 @@ def parse_args(args):
         p.add_argument('--version', action='version', version='%(prog)s 0.1')
         p.add_argument('--verbose', action='store_true', help='Be chatty')
         p.add_argument('--environment', '-e', default=None, help='set the environment to run on')
+        p.add_argument('--bootstrap', action='store_true', default=True)
+        p.add_argument('--no-bootstrap', dest='bootstrap', action='store_false', default=True,
+                help='enable/disable bootstrap')
         p.add_argument('--ha', action='store_true',
                 help='change the state servers to be in HA mode')
         p.add_argument('--constraints-0', '-0', default=bigMem,
@@ -291,6 +297,8 @@ def parse_args(args):
                 help='Set the constraints for machines other that bootstrap, default is m3.large')
         p.add_argument('--upload-tools', default=False, action='store_true',
                 help='pass --upload-tools to juju bootstrap')
+        p.add_argument('--debug', default=False, action='store_true',
+                help='pass --debug to juju bootstrap')
         p.add_argument('--num-machines', '-n', default=15, type=int,
                 help='How many virtual machines to allocate (default 15)')
         p.add_argument('--num-lxc', '-l', default=0, type=int,
@@ -303,6 +311,8 @@ def parse_args(args):
                 help="print what you would do, don't do it yet")
         p.add_argument('--no-dry-run', dest='dry_run', action='store_false',
                 help="override --dry-run and just do it")
+        p.add_argument('--juju', default='juju',
+                help='path to the juju binary to run')
 
         return p.parse_args(args)
 
