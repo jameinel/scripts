@@ -276,7 +276,7 @@ def build_env(opts):
         t.join()
 
 
-bigMem = 'mem=29G cpu-cores=8'
+bigMem = 'mem=29G cpu-cores=8 root-disk=20G'
 medMem = 'mem=7G cpu-cores=2'
 smallMem = 'mem=2G cpu-cores=1'
 
