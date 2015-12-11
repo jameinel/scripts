@@ -107,7 +107,7 @@ def current_environment_name(opts):
     if opts.environment:
         return opts.environment
     cmd = ["juju", "switch"]
-    return suprocess.check_output(cmd).strip()
+    return subprocess.check_output(cmd).strip()
 
 
 def connect_to_environment(opts):
@@ -125,11 +125,11 @@ def connect_to_environment(opts):
 
 
 def ha(opts):
-    if not opts.ha:
+    if opts.ha == 1:
         return
     cmd = envcmd(opts, "ensure-availability")
+    cmd.extend(["-n", str(opts.ha)])
     run(opts, cmd)
-
 
 def reset_constraints(opts):
     if not opts.constraints_1:
@@ -161,8 +161,8 @@ def work_on_queue(env, queue):
                 return
             func = getattr(env, funcName)
             try:
-                result = func(**kwargs)
-            except jujuclient.EnvError as e:
+                func(**kwargs)
+            except jujuclient.EnvError:
                 global failureCount
                 failureCount += 1
             else:
@@ -289,8 +289,8 @@ def parse_args(args):
         p.add_argument('--bootstrap', action='store_true', default=True)
         p.add_argument('--no-bootstrap', dest='bootstrap', action='store_false', default=True,
                 help='enable/disable bootstrap')
-        p.add_argument('--ha', action='store_true',
-                help='change the state servers to be in HA mode')
+        p.add_argument('--ha', type=int, choices=[1, 3, 5, 7], default=1,
+                help='Specify the number of state servers to use (default is 1)')
         p.add_argument('--constraints-0', '-0', default=bigMem,
                 help='Set the size of the root machine. By default it is an m3.2xlarge')
         p.add_argument('--constraints-1', '-1', default=medMem,
